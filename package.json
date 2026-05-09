@@ -1,0 +1,30 @@
+{
+  "name": "gd-admin-ui",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --mode dev",
+    "build": "vue-tsc -b && vite build --mode prod",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@arco-design/web-vue": "^2.56.1",
+    "axios": "^1.8.4",
+    "echarts": "^5.6.0",
+    "pinia": "^3.0.2",
+    "pinia-plugin-persistedstate": "^4.5.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.1",
+    "@vitejs/plugin-vue": "^5.2.2",
+    "@vue/tsconfig": "^0.7.0",
+    "sass-embedded": "^1.93.2",
+    "typescript": "~5.7.2",
+    "vite": "^6.3.1",
+    "vite-plugin-vue-devtools": "^8.0.2",
+    "vue-tsc": "^2.2.8"
+  }
+}

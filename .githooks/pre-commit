@@ -1,0 +1,39 @@
+#!/bin/sh
+#
+# pre-commit: only README*.md files may be staged in this commit.
+# Activate with: git config core.hooksPath .githooks
+#
+
+staged=$(git diff --cached --name-only)
+
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+rejected=""
+for file in $staged; do
+  case "$file" in
+    README*.md) ;;
+    .githooks/*) ;;
+    *) rejected="$rejected\n  $file" ;;
+  esac
+done
+
+if [ -n "$rejected" ]; then
+  echo ""
+  echo "❌ 提交被拒绝 / Commit rejected"
+  echo ""
+  echo "   此仓库当前只允许提交 README*.md 文件。"
+  echo "   Only README*.md files may be committed in this repository."
+  echo ""
+  echo "   以下文件不符合规范 / Rejected files:"
+  printf "%b\n" "$rejected"
+  echo ""
+  echo "   如需提交其他文件，请先执行："
+  echo "   To commit other files, run first:"
+  echo "     git config --unset core.hooksPath"
+  echo ""
+  exit 1
+fi
+
+exit 0
