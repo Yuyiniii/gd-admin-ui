@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import type { RouteRecordRaw } from 'vue-router'
 import type { BackendMenu } from '@/api/menu'
 import { getMenuList } from '@/api/menu'
-import { buildMenuTree, transformMenuToRoutes, filterSidebarMenus } from '@/router/dynamicRoutes'
+import { buildMenuTree, transformMenuToRoutes, filterSidebarMenus } from '@/router/dynamic'
 
 export const usePermissionStore = defineStore('permission', () => {
   const menus = ref<BackendMenu[]>([])
@@ -31,7 +31,9 @@ export const usePermissionStore = defineStore('permission', () => {
 
     menus.value = tree
     sidebarMenus.value = filterSidebarMenus(tree)
-    permissions.value = extractPermissions(rawMenus)
+    // Merge with existing permissions (e.g. *:*:* synced from getUserInfo) instead of overwriting
+    const menuPermissions = extractPermissions(rawMenus)
+    permissions.value = [...new Set([...permissions.value, ...menuPermissions])]
 
     return transformMenuToRoutes(tree)
   }
@@ -68,6 +70,7 @@ export const usePermissionStore = defineStore('permission', () => {
   }
 
   function hasPermission(permission: string): boolean {
+    if (permissions.value.includes('*:*:*')) return true
     return permissions.value.includes(permission)
   }
 
@@ -90,7 +93,7 @@ export const usePermissionStore = defineStore('permission', () => {
   }
 }, {
   persist: {
-    key: 'permission-store',
+    key: 'permission-store-v2',
     storage: localStorage,
     pick: ['menus', 'sidebarMenus', 'permissions']
   }

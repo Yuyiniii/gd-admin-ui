@@ -1,36 +1,43 @@
 <template>
   <div>
-    <!-- 页面标题 -->
     <div style="margin-bottom: 16px">
       <a-typography-title :heading="5" :style="{ margin: '0 0 4px 0' }">用户管理</a-typography-title>
       <a-typography-text type="secondary">管理系统用户账号</a-typography-text>
     </div>
 
     <a-card :body-style="{ padding: 0 }">
-      <!-- 搜索区 -->
-      <div style="padding: 16px; border-bottom: 1px solid var(--color-border-2)">
-        <a-space wrap>
-          <a-input v-model="searchForm.username" placeholder="用户名称" allow-clear style="width: 160px" />
-          <a-input v-model="searchForm.phonenumber" placeholder="手机号码" allow-clear style="width: 150px" />
-          <a-select v-model="searchForm.status" placeholder="状态" allow-clear style="width: 100px">
-            <a-option :value="1">正常</a-option>
-            <a-option :value="0">停用</a-option>
-          </a-select>
-          <a-range-picker v-model="searchForm.dateRange" style="width: 220px" />
-          <a-button type="primary" @click="handleSearch">
-            <template #icon><icon-search /></template>搜索
+      <UserSearchBar v-model="searchForm" @search="refresh" @reset="refresh" />
+
+      <div
+        style="
+          padding: 12px 16px;
+          border-bottom: 1px solid var(--color-border-2);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        "
+      >
+        <a-space>
+          <a-button v-hasPermi="'system:user:add'" type="primary" @click="handleAdd">
+            <template #icon><icon-plus /></template>新增用户
           </a-button>
-          <a-button @click="handleReset">
-            <template #icon><icon-refresh /></template>重置
+          <a-popconfirm
+            v-if="selectedKeys.length > 0"
+            v-hasPermi="'system:user:delete'"
+            :content="`确定要删除选中的 ${selectedKeys.length} 个用户吗？`"
+            @ok="batchRemove(selectedKeys as number[])"
+          >
+            <a-button status="danger">
+              <template #icon><icon-delete /></template>批量删除
+            </a-button>
+          </a-popconfirm>
+          <a-button v-hasPermi="'system:user:export'" :loading="exportLoading" @click="handleExport">
+            <template #icon><icon-download /></template>导出
           </a-button>
         </a-space>
-      </div>
-
-      <!-- 工具栏 -->
-      <div style="padding: 12px 16px; border-bottom: 1px solid var(--color-border-2)">
-        <a-button type="primary" @click="handleAdd">
-          <template #icon><icon-plus /></template>新增用户
-        </a-button>
+        <a-typography-text v-if="selectedKeys.length > 0" type="secondary" style="font-size: 13px">
+          已选 {{ selectedKeys.length }} 条
+        </a-typography-text>
       </div>
 
       <a-table
@@ -40,15 +47,21 @@
         :pagination="pagination"
         :scroll="{ x: 'max-content' }"
         :row-selection="{ type: 'checkbox', showCheckedAll: true }"
-        @page-change="handlePageChange"
-        @page-size-change="handlePageSizeChange"
-        @selection-change="handleSelectionChange"
         row-key="userID"
+        @page-change="onPageChange"
+        @page-size-change="onPageSizeChange"
+        @selection-change="onSelectionChange"
       >
-        <!-- 用户信息 -->
+        <template #empty>
+          <TableStatePanel :loading="loading" :error="loadError" @retry="reload" />
+        </template>
+
         <template #userInfo="{ record }">
           <a-space>
-            <a-avatar :size="36" :style="{ background: 'rgba(var(--arcoblue-6), 0.15)', color: 'rgb(var(--arcoblue-6))' }">
+            <a-avatar
+              :size="36"
+              :style="{ background: 'rgba(var(--arcoblue-6), 0.15)', color: 'rgb(var(--arcoblue-6))' }"
+            >
               <icon-user />
             </a-avatar>
             <a-space direction="vertical" :size="0">
@@ -58,414 +71,246 @@
           </a-space>
         </template>
 
-        <!-- 部门信息 -->
         <template #dept="{ record }">{{ record.deptName || '-' }}</template>
 
-        <!-- 角色信息 -->
         <template #roles="{ record }">
           <a-space wrap size="mini">
-            <a-tag v-for="(role, idx) in record.role_names" :key="idx" size="small" color="arcoblue">{{ role }}</a-tag>
+            <a-tag v-for="(role, idx) in record.role_names" :key="idx" size="small" color="arcoblue">{{
+              role
+            }}</a-tag>
             <a-typography-text v-if="!record.role_names?.length" type="secondary">-</a-typography-text>
           </a-space>
         </template>
 
-        <!-- 状态 -->
         <template #status="{ record }">
-          <a-tag :color="record.status === 1 ? 'green' : 'red'" size="small">
-            {{ record.status === 1 ? '正常' : '停用' }}
-          </a-tag>
+          <a-switch
+            :model-value="record.status === 1"
+            :disabled="!canEditUser"
+            size="small"
+            checked-color="rgb(var(--green-6))"
+            @change="(val: string | number | boolean) => handleStatusChange(record, val ? 1 : 0)"
+          />
         </template>
 
-        <!-- 创建时间 -->
         <template #createTime="{ record }">
-          <a-typography-text type="secondary" style="font-size: 13px">{{ formatDate(record.createdAt) }}</a-typography-text>
+          <a-typography-text type="secondary" style="font-size: 13px">{{ record.createdAt || '-' }}</a-typography-text>
         </template>
 
-        <!-- 操作列 -->
         <template #operations="{ record }">
-          <a-space>
-            <a-link @click="handleEdit(record)"><icon-edit /> 编辑</a-link>
-            <a-link @click="handleResetPwd(record)" status="warning"><icon-lock /> 重置密码</a-link>
-            <a-popconfirm content="确定要删除该用户吗？" @ok="handleDelete(record)">
-              <a-link status="danger"><icon-delete /> 删除</a-link>
+          <div class="op-cell">
+            <a-link v-hasPermi="'system:user:edit'" class="op-btn" @click="handleEdit(record)">
+              <icon-edit />编辑
+            </a-link>
+            <a-link
+              v-hasPermi="'system:user:resetPwd'"
+              class="op-btn"
+              status="warning"
+              @click="handleResetPwd(record)"
+            >
+              <icon-lock />重置密码
+            </a-link>
+            <a-popconfirm
+              v-hasPermi="'system:user:delete'"
+              content="确定要删除该用户吗？"
+              @ok="remove(record.userID)"
+            >
+              <a-link class="op-btn" status="danger">
+                <icon-delete />删除
+              </a-link>
             </a-popconfirm>
-          </a-space>
+          </div>
         </template>
       </a-table>
     </a-card>
 
-
-    <!-- 用户表单弹窗 -->
-    <a-modal
+    <UserFormModal
       v-model:visible="formVisible"
-      :title="formMode === 'add' ? '新增用户' : '编辑用户'"
-      :width="600"
-      :mask-closable="false"
-      @before-ok="handleSubmit"
-      @cancel="handleCancel"
-    >
-      <a-form ref="formRef" :model="formData" :rules="formRules" layout="vertical" auto-label-width>
-        <a-form-item label="用户名称" field="nickname">
-          <a-input v-model="formData.nickname" placeholder="请输入用户名称" />
-        </a-form-item>
+      v-model:form-data="formData"
+      :mode="formMode"
+      :dept-tree="deptTree"
+      :role-options="roleOptions"
+      @submit="handleSubmit"
+    />
 
-        <a-form-item label="登录账号" field="username">
-          <a-input
-            v-model="formData.username"
-            placeholder="请输入登录账号"
-            :disabled="formMode === 'edit'"
-          />
-        </a-form-item>
-
-        <a-form-item label="用户密码" field="password" v-if="formMode === 'add'">
-          <a-input-password v-model="formData.password" placeholder="请输入用户密码" />
-        </a-form-item>
-
-        <a-form-item label="部门" field="deptId">
-          <a-tree-select
-            v-model="formData.deptId"
-            :data="deptTree"
-            placeholder="请选择部门"
-            allow-clear
-            allow-search
-            :field-names="{ key: 'deptId', title: 'deptName', children: 'children' }"
-          />
-        </a-form-item>
-
-        <a-form-item label="手机号码" field="phone">
-          <a-input v-model="formData.phone" placeholder="请输入手机号码" />
-        </a-form-item>
-
-        <a-form-item label="邮箱" field="email">
-          <a-input v-model="formData.email" placeholder="请输入邮箱" />
-        </a-form-item>
-
-        <a-form-item label="角色" field="roleIds">
-          <a-select
-            v-model="formData.roleIds"
-            placeholder="请选择角色"
-            multiple
-            allow-create
-          >
-            <a-option v-for="role in roleOptions" :key="role.roleId" :value="role.roleId">
-              {{ role.roleName }}
-            </a-option>
-          </a-select>
-        </a-form-item>
-
-        <a-form-item label="状态" field="status">
-          <a-switch v-model="formData.status" :checked-value="1" :unchecked-value="0" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
-
-    <!-- 重置密码弹窗 -->
-    <a-modal
+    <ResetPasswordModal
       v-model:visible="resetPwdVisible"
-      title="重置密码"
-      :width="400"
-      :mask-closable="false"
-      @before-ok="handleResetPwdSubmit"
-      @cancel="resetPwdVisible = false"
-    >
-      <a-form ref="resetPwdFormRef" :model="resetPwdForm" :rules="resetPwdRules" layout="vertical" auto-label-width>
-        <a-form-item label="新密码" field="newPassword">
-          <a-input-password v-model="resetPwdForm.newPassword" placeholder="请输入新密码" />
-        </a-form-item>
-        <a-form-item label="确认密码" field="confirmPassword">
-          <a-input-password v-model="resetPwdForm.confirmPassword" placeholder="请确认密码" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
+      v-model:form="resetPwdForm"
+      @submit="handleResetPwdSubmit"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import {
-  IconPlus,
-  IconSearch,
-  IconRefresh,
-  IconEdit,
-  IconDelete,
-  IconLock,
-  IconUser,
-} from '@arco-design/web-vue/es/icon'
+import { ref, onMounted, computed } from 'vue'
+import { IconPlus, IconEdit, IconDelete, IconLock, IconUser, IconDownload } from '@arco-design/web-vue/es/icon'
 import { Message } from '@arco-design/web-vue'
 import {
   getUserPage,
-  getUserDetail,
   createUser,
   updateUser,
   deleteUser,
+  batchDeleteUser,
   resetPassword as resetPasswordApi,
+  exportUserList,
   type UserPageItem,
-  type UserPageRequest,
   type CreateUserRequest,
   type UpdateUserRequest,
 } from '@/api/system/user'
-import { getDeptTree, type DeptInfo } from '@/api/system/dept'
+import { getDeptTree } from '@/api/system/dept'
 import { getAllRoles } from '@/api/system/role'
+import UserSearchBar, { type UserSearchForm } from './components/UserSearchBar.vue'
+import UserFormModal, {
+  type UserFormData,
+  type DeptTreeNode,
+  type RoleOption,
+} from './components/UserFormModal.vue'
+import ResetPasswordModal, { type ResetPasswordForm } from './components/ResetPasswordModal.vue'
+import { useCrudTable } from '@/composables/useCrudTable'
+import { usePermission } from '@/composables/usePermission'
+import TableStatePanel from '@/components/TableStatePanel.vue'
 
-interface UserItem extends UserPageItem {}
+const { hasPermission } = usePermission()
+// 「状态切换」按钮内联 disabled 用，不能直接挂指令
+const canEditUser = computed(() => hasPermission('system:user:edit'))
 
-interface DeptItem {
-  deptId: number
-  deptName: string
-  children?: DeptItem[]
-}
-
-interface RoleItem {
-  roleId: number
-  roleName: string
-}
-
-// 搜索表单
-const searchForm = reactive({
+const searchForm = ref<UserSearchForm>({
   username: '',
   phonenumber: '',
-  status: undefined as number | undefined,
-  dateRange: [] as string[],
+  status: undefined,
+  dateRange: [],
 })
 
-// 表格列定义
 const columns = [
-  {
-    title: '用户名称',
-    dataIndex: 'nickname',
-    slotName: 'userInfo',
-    width: 200,
-  },
-  {
-    title: '部门',
-    dataIndex: 'deptName',
-    slotName: 'dept',
-    width: 150,
-  },
-  {
-    title: '手机号码',
-    dataIndex: 'phone',
-    width: 130,
-  },
-  {
-    title: '角色',
-    dataIndex: 'role_names',
-    slotName: 'roles',
-    width: 200,
-  },
-  {
-    title: '状态',
-    dataIndex: 'status',
-    slotName: 'status',
-    width: 80,
-  },
-  {
-    title: '创建时间',
-    dataIndex: 'createdAt',
-    slotName: 'createTime',
-    width: 180,
-  },
-  {
-    title: '操作',
-    slotName: 'operations',
-    width: 220,
-    fixed: 'right' as const,
-  },
+  { title: '用户名称', dataIndex: 'nickname', slotName: 'userInfo', width: 200 },
+  { title: '部门', dataIndex: 'deptName', slotName: 'dept', width: 150 },
+  { title: '手机号码', dataIndex: 'phone', width: 130 },
+  { title: '角色', dataIndex: 'role_names', slotName: 'roles', width: 200 },
+  { title: '状态', dataIndex: 'status', slotName: 'status', width: 80 },
+  { title: '创建时间', dataIndex: 'createdAt', slotName: 'createTime', width: 180 },
+  { title: '操作', slotName: 'operations', width: 200, fixed: 'right' as const },
 ]
 
-// 表格数据
-const tableData = ref<UserItem[]>([])
-const loading = ref(false)
-const pagination = reactive({
-  current: 1,
-  pageSize: 10,
-  total: 0,
-  showTotal: true,
-  showPageSize: true,
+const exportLoading = ref(false)
+const deptTree = ref<DeptTreeNode[]>([])
+const roleOptions = ref<RoleOption[]>([])
+
+const {
+  tableData,
+  loading,
+  loadError,
+  selectedKeys,
+  pagination,
+  reload,
+  refresh,
+  onPageChange,
+  onPageSizeChange,
+  onSelectionChange,
+  remove,
+  batchRemove,
+} = useCrudTable<UserPageItem>({
+  fetcher: async ({ pageNum, pageSize }) => {
+    const res = await getUserPage({
+      pageNum,
+      pageSize,
+      username: searchForm.value.username || undefined,
+      phonenumber: searchForm.value.phonenumber || undefined,
+      status: searchForm.value.status,
+      beginTime: searchForm.value.dateRange[0] || undefined,
+      endTime: searchForm.value.dateRange[1] || undefined,
+    })
+    return { list: res.data.list || [], total: res.data.total || 0 }
+  },
+  deleter: (id: number) => deleteUser(id),
+  batchDeleter: (ids: number[]) => batchDeleteUser(ids),
+  rowKey: 'userID',
 })
 
-// 部门树数据
-const deptTree = ref<DeptItem[]>([])
-
-// 角色选项
-const roleOptions = ref<RoleItem[]>([])
-
-// 表单相关
+// UserFormModal / ResetPasswordModal 是已存在的子组件，外部 v-model：保持原 API。
 const formVisible = ref(false)
 const formMode = ref<'add' | 'edit'>('add')
-const formRef = ref()
+const formData = ref<UserFormData>(emptyFormData())
 
-const formData = reactive({
-  userId: undefined as number | undefined,
-  username: '',
-  nickname: '',
-  password: '',
-  deptId: undefined as number | undefined,
-  phone: '',
-  email: '',
-  roleIds: [] as number[],
-  status: 1,
-})
-
-const formRules = {
-  username: [{ required: true, message: '请输入登录账号' }],
-  nickname: [{ required: true, message: '请输入用户名称' }],
-  password: [{ required: true, message: '请输入用户密码', minLength: 6 }],
-}
-
-// 重置密码相关
 const resetPwdVisible = ref(false)
-const resetPwdFormRef = ref()
-const resetPwdForm = reactive({
-  userId: undefined as number | undefined,
+const resetPwdForm = ref<ResetPasswordForm>({
+  userId: undefined,
   newPassword: '',
   confirmPassword: '',
 })
 
-const resetPwdRules = {
-  newPassword: [
-    { required: true, message: '请输入新密码' },
-    { minLength: 6, message: '密码长度不能少于6位' },
-  ],
-  confirmPassword: [
-    { required: true, message: '请确认密码' },
-    {
-      validator: (value: string, callback: (error: string | undefined) => void) => {
-        if (value !== resetPwdForm.newPassword) {
-          callback('两次输入的密码不一致')
-        } else {
-          callback(undefined)
-        }
-      },
-    },
-  ],
-}
-
-// 格式化日期
-const formatDate = (date: string) => {
-  if (!date) return '-'
-  return date
-}
-
-// 加载数据
-const loadData = async () => {
-  loading.value = true
-  try {
-    const params: UserPageRequest = {
-      pageNum: pagination.current,
-      pageSize: pagination.pageSize,
-      username: searchForm.username || undefined,
-      phonenumber: searchForm.phonenumber || undefined,
-      status: searchForm.status,
-      beginTime: searchForm.dateRange[0] || undefined,
-      endTime: searchForm.dateRange[1] || undefined,
-    }
-
-    const res = await getUserPage(params)
-    tableData.value = res.data.list || []
-    pagination.total = res.data.total || 0
-  } catch (error) {
-    Message.error('加载数据失败')
-  } finally {
-    loading.value = false
+function emptyFormData(): UserFormData {
+  return {
+    userId: undefined,
+    username: '',
+    nickname: '',
+    password: '',
+    deptId: undefined,
+    phone: '',
+    email: '',
+    sex: 0,
+    roleIds: [],
+    status: 1,
+    remark: '',
   }
 }
 
-// 搜索
-const handleSearch = () => {
-  pagination.current = 1
-  loadData()
-}
-
-// 重置
-const handleReset = () => {
-  searchForm.username = ''
-  searchForm.phonenumber = ''
-  searchForm.status = undefined
-  searchForm.dateRange = []
-  handleSearch()
-}
-
-// 分页
-const handlePageChange = (page: number) => {
-  pagination.current = page
-  loadData()
-}
-
-const handlePageSizeChange = (pageSize: number) => {
-  pagination.pageSize = pageSize
-  pagination.current = 1
-  loadData()
-}
-
-// 表格选择
-const handleSelectionChange = (keys: (string | number)[]) => {
-  console.log('选中行:', keys)
-}
-
-// 新增
-const handleAdd = () => {
+function handleAdd() {
   formMode.value = 'add'
-  formData.userId = undefined
-  formData.username = ''
-  formData.nickname = ''
-  formData.password = ''
-  formData.deptId = undefined
-  formData.phone = ''
-  formData.email = ''
-  formData.roleIds = []
-  formData.status = 1
+  formData.value = emptyFormData()
   formVisible.value = true
 }
 
-// 编辑
-const handleEdit = async (record: UserItem) => {
+function handleEdit(record: UserPageItem) {
   formMode.value = 'edit'
-  formData.userId = record.userID
-  formData.username = record.username
-  formData.nickname = record.nickname
-  formData.deptId = record.deptID
-  formData.phone = record.phone || ''
-  formData.email = record.email || ''
-  formData.roleIds = record.role_ids || []
-  formData.status = record.status
+  formData.value = {
+    userId: record.userID,
+    username: record.username,
+    nickname: record.nickname,
+    password: '',
+    deptId: record.deptID ?? undefined,
+    phone: record.phone || '',
+    email: record.email || '',
+    sex: record.sex ?? 0,
+    roleIds: record.role_ids || [],
+    status: record.status,
+    remark: record.remark || '',
+  }
   formVisible.value = true
 }
 
-// 提交表单
-const handleSubmit = async (done: (val: boolean) => void) => {
+async function handleSubmit(done: (val: boolean) => void) {
   try {
-    await formRef.value?.validate()
-
     if (formMode.value === 'add') {
       const data: CreateUserRequest = {
-        username: formData.username,
-        nickname: formData.nickname,
-        password: formData.password,
-        deptID: formData.deptId,
-        phone: formData.phone,
-        email: formData.email,
-        role_ids: formData.roleIds,
-        status: formData.status,
+        username: formData.value.username,
+        nickname: formData.value.nickname,
+        password: formData.value.password,
+        deptID: formData.value.deptId,
+        phone: formData.value.phone,
+        email: formData.value.email,
+        sex: formData.value.sex,
+        role_ids: formData.value.roleIds,
+        status: formData.value.status,
+        remark: formData.value.remark,
       }
       await createUser(data)
       Message.success('新增成功')
     } else {
       const data: UpdateUserRequest = {
-        user_id: formData.userId!,
-        nickname: formData.nickname,
-        dept_id: formData.deptId,
-        phone: formData.phone,
-        email: formData.email,
-        role_ids: formData.roleIds,
-        status: formData.status,
+        user_id: formData.value.userId!,
+        nickname: formData.value.nickname,
+        dept_id: formData.value.deptId,
+        phone: formData.value.phone,
+        email: formData.value.email,
+        sex: formData.value.sex,
+        role_ids: formData.value.roleIds,
+        status: formData.value.status,
+        remark: formData.value.remark,
       }
       await updateUser(data)
       Message.success('修改成功')
     }
-
     formVisible.value = false
-    loadData()
+    reload()
     done(true)
   } catch (error: any) {
     Message.error(error.message || '操作失败')
@@ -473,29 +318,21 @@ const handleSubmit = async (done: (val: boolean) => void) => {
   }
 }
 
-// 取消
-const handleCancel = () => {
-  formRef.value?.resetFields()
-}
-
-// 重置密码
-const handleResetPwd = (record: UserItem) => {
-  resetPwdForm.userId = record.userID
-  resetPwdForm.newPassword = ''
-  resetPwdForm.confirmPassword = ''
+function handleResetPwd(record: UserPageItem) {
+  resetPwdForm.value = {
+    userId: record.userID,
+    newPassword: '',
+    confirmPassword: '',
+  }
   resetPwdVisible.value = true
 }
 
-// 提交重置密码
-const handleResetPwdSubmit = async (done: (val: boolean) => void) => {
+async function handleResetPwdSubmit(done: (val: boolean) => void) {
   try {
-    await resetPwdFormRef.value?.validate()
-
     await resetPasswordApi({
-      user_id: resetPwdForm.userId!,
-      new_password: resetPwdForm.newPassword,
+      user_id: resetPwdForm.value.userId!,
+      new_password: resetPwdForm.value.newPassword,
     })
-
     Message.success('密码重置成功')
     resetPwdVisible.value = false
     done(true)
@@ -505,43 +342,79 @@ const handleResetPwdSubmit = async (done: (val: boolean) => void) => {
   }
 }
 
-// 删除
-const handleDelete = async (record: UserItem) => {
+async function handleStatusChange(record: UserPageItem, status: number) {
+  const original = record.status
+  record.status = status
   try {
-    await deleteUser(record.userID)
-    Message.success('删除成功')
-    loadData()
+    await updateUser({
+      user_id: record.userID,
+      nickname: record.nickname,
+      dept_id: record.deptID ?? undefined,
+      phone: record.phone,
+      email: record.email,
+      sex: record.sex,
+      role_ids: record.role_ids,
+      status,
+    })
+    Message.success(status === 1 ? '已启用' : '已停用')
   } catch (error: any) {
-    Message.error(error.message || '删除失败')
+    record.status = original
+    Message.error(error.message || '状态修改失败')
   }
 }
 
-// 加载部门树
-const loadDeptTree = async () => {
+async function handleExport() {
+  exportLoading.value = true
+  try {
+    const blob = await exportUserList()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `用户列表_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    Message.success('导出成功')
+  } catch (error: any) {
+    Message.error(error.message || '导出失败')
+  } finally {
+    exportLoading.value = false
+  }
+}
+
+async function loadDeptTree() {
   try {
     const res = await getDeptTree()
     deptTree.value = res.data.list || []
-  } catch (error) {
-    console.error('加载部门树失败', error)
+  } catch {
+    // ignore
   }
 }
 
-// 加载角色选项
-const loadRoles = async () => {
+async function loadRoles() {
   try {
     const res = await getAllRoles()
     roleOptions.value = res.data.list || []
-  } catch (error) {
-    console.error('加载角色列表失败', error)
+  } catch {
+    // ignore
   }
 }
 
 onMounted(() => {
-  loadData()
+  reload()
   loadDeptTree()
   loadRoles()
 })
 </script>
 
 <style scoped>
+.op-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+.op-btn {
+  white-space: nowrap;
+}
 </style>

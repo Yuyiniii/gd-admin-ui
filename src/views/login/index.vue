@@ -240,7 +240,7 @@ const onCaptchaInput = (value: string) => {
   formData.captcha = value.toUpperCase()
 }
 
-const handleSubmit = async ({ values }: { values: typeof formData }) => {
+const handleSubmit = async () => {
   generalError.value = ''
 
   // 表单验证

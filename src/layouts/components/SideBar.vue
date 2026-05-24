@@ -26,14 +26,32 @@
           >
             <template #icon><component :is="getIcon(menu)" /></template>
             <template #title>{{ menu.MenuName }}</template>
-            <a-menu-item
-              v-for="sub in menu.items"
-              :key="childKey(menu, sub)"
-            >
-              <template #icon><component :is="getIcon(sub)" /></template>
-              {{ sub.MenuName }}
-            </a-menu-item>
+
+            <template v-for="sub in menu.items" :key="childKey(menu, sub)">
+              <!-- 子项本身也有子菜单（第三层） -->
+              <a-sub-menu
+                v-if="sub.items && sub.items.length"
+                :key="childKey(menu, sub)"
+              >
+                <template #icon><component :is="getIcon(sub)" /></template>
+                <template #title>{{ sub.MenuName }}</template>
+                <a-menu-item
+                  v-for="leaf in sub.items"
+                  :key="grandchildKey(menu, sub, leaf)"
+                >
+                  <template #icon><component :is="getIcon(leaf)" /></template>
+                  {{ leaf.MenuName }}
+                </a-menu-item>
+              </a-sub-menu>
+
+              <!-- 普通子叶子节点 -->
+              <a-menu-item v-else :key="childKey(menu, sub)">
+                <template #icon><component :is="getIcon(sub)" /></template>
+                {{ sub.MenuName }}
+              </a-menu-item>
+            </template>
           </a-sub-menu>
+
           <a-menu-item v-else :key="leafKey(menu)">
             <template #icon><component :is="getIcon(menu)" /></template>
             {{ menu.MenuName }}
@@ -84,7 +102,7 @@ const collapsed = ref(false)
 const openKeys = ref<string[]>([])
 const isMobile = ref(false)
 
-const menuList = computed(() => permissionStore.menus || [])
+const menuList = computed(() => permissionStore.sidebarMenus || [])
 const selectedKeys = computed(() => [route.path])
 
 const iconMap: Record<string, any> = {
@@ -124,6 +142,7 @@ const iconMap: Record<string, any> = {
   book: markRaw(IconBook),
   dict: markRaw(IconBook),
   file: markRaw(IconFile),
+  'file-text': markRaw(IconFile),
   folder: markRaw(IconFolder),
   'folder-add': markRaw(IconFolderAdd),
   'drive-file': markRaw(IconDriveFile),
@@ -205,16 +224,27 @@ const norm = (p: string) => (p || '').replace(/^\/+/, '')
 const leafKey = (menu: BackendMenu) => `/${norm(menu.Path)}`
 const childKey = (parent: BackendMenu, child: BackendMenu) =>
   `/${norm(parent.Path)}/${norm(child.Path)}`
+const grandchildKey = (grandparent: BackendMenu, parent: BackendMenu, child: BackendMenu) =>
+  `/${norm(grandparent.Path)}/${norm(parent.Path)}/${norm(child.Path)}`
 const subMenuKey = (menu: BackendMenu) => norm(menu.Path)
 
 const syncOpenKeys = () => {
   const path = route.path
   for (const menu of menuList.value) {
-    if (menu.items?.length) {
-      const found = menu.items.some((sub) => childKey(menu, sub) === path)
-      if (found) {
+    if (!menu.items?.length) continue
+    for (const sub of menu.items) {
+      // 直接子节点匹配
+      if (childKey(menu, sub) === path) {
         openKeys.value = [subMenuKey(menu)]
         return
+      }
+      // 三级孙节点匹配
+      if (sub.items?.length) {
+        const found = sub.items.some(leaf => grandchildKey(menu, sub, leaf) === path)
+        if (found) {
+          openKeys.value = [subMenuKey(menu), childKey(menu, sub)]
+          return
+        }
       }
     }
   }

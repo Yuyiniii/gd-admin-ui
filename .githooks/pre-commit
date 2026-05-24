@@ -1,39 +1,60 @@
 #!/bin/sh
 #
-# pre-commit: only README*.md files may be staged in this commit.
-# Activate with: git config core.hooksPath .githooks
+# pre-commit: 静态检查 + 防呆
+#
+# 启用方式（每个克隆者执行一次）：
+#   git config core.hooksPath .githooks
+#
+# 临时跳过（紧急修复）：
+#   git commit --no-verify
+#
+# 跳过情况：仓库无任何已暂存改动时直接放行。
 #
 
-staged=$(git diff --cached --name-only)
+set -e
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
 
 if [ -z "$staged" ]; then
   exit 0
 fi
 
-rejected=""
-for file in $staged; do
-  case "$file" in
-    README*.md) ;;
-    .githooks/*) ;;
-    *) rejected="$rejected\n  $file" ;;
-  esac
+# --- 1. 检查是否误提交体积过大的文件（>2MB） ------------------------
+big_files=""
+for f in $staged; do
+  [ -f "$f" ] || continue
+  size=$(wc -c < "$f" 2>/dev/null || echo 0)
+  if [ "$size" -gt 2097152 ]; then
+    big_files="$big_files\n  $f ($((size/1024)) KB)"
+  fi
 done
-
-if [ -n "$rejected" ]; then
-  echo ""
-  echo "❌ 提交被拒绝 / Commit rejected"
-  echo ""
-  echo "   此仓库当前只允许提交 README*.md 文件。"
-  echo "   Only README*.md files may be committed in this repository."
-  echo ""
-  echo "   以下文件不符合规范 / Rejected files:"
-  printf "%b\n" "$rejected"
-  echo ""
-  echo "   如需提交其他文件，请先执行："
-  echo "   To commit other files, run first:"
-  echo "     git config --unset core.hooksPath"
-  echo ""
+if [ -n "$big_files" ]; then
+  printf "\n❌ 拒绝提交：以下文件超过 2MB\n%b\n\n如确需提交大文件，请改用 git lfs，或使用 --no-verify。\n\n" "$big_files"
   exit 1
+fi
+
+# --- 2. 简易秘钥扫描 -------------------------------------------------
+secret_hits=$(git diff --cached -U0 -- $staged 2>/dev/null \
+  | grep -E '^\+' \
+  | grep -Ein 'AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH|PRIVATE) (KEY|PRIVATE KEY)-----|ghp_[A-Za-z0-9]{36}|xox[abpr]-[A-Za-z0-9-]+|sk-[A-Za-z0-9]{20,}' \
+  || true)
+if [ -n "$secret_hits" ]; then
+  printf "\n❌ 拒绝提交：暂存内容疑似包含密钥\n%s\n\n如为误判，请使用 --no-verify。\n\n" "$secret_hits"
+  exit 1
+fi
+
+# --- 3. 仅当存在前端代码改动时跑 TypeScript 类型检查 ----------------
+fe_changed=$(echo "$staged" | grep -E '\.(ts|tsx|vue|js|jsx)$' || true)
+if [ -n "$fe_changed" ]; then
+  if command -v npx >/dev/null 2>&1; then
+    echo "🔍 运行 TypeScript 类型检查..."
+    npx vue-tsc -b --noEmit || {
+      echo "❌ 类型检查失败。"
+      exit 1
+    }
+  else
+    echo "⚠️  未发现 npx，跳过类型检查。"
+  fi
 fi
 
 exit 0

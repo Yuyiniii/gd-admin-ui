@@ -40,6 +40,7 @@
 import { ref, computed, onMounted, onErrorCaptured } from 'vue'
 import { useUserStore } from '@/utils/pinia/pinia'
 import { usePermissionStore } from '@/utils/pinia/permission'
+import { useNotifyStore } from '@/utils/pinia/notify'
 import AppSidebar from './components/SideBar.vue'
 import AppHeader from './components/AppHeader.vue'
 import AppFooter from './components/AppFooter.vue'
@@ -47,6 +48,7 @@ import { Message } from '@arco-design/web-vue'
 
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
+const notifyStore = useNotifyStore()
 
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
@@ -99,7 +101,13 @@ onMounted(async () => {
         // ignore
       }
       await userStore.logout()
+      return
     }
+  }
+
+  // 登录态进入主布局后启动站内信：拉未读数 / 历史 + 建立 WS
+  if (userStore.token) {
+    notifyStore.bootstrap()
   }
 })
 </script>

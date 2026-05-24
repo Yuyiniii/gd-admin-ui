@@ -8,9 +8,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pnpm dev          # Dev server at http://localhost:8088 (proxies API to http://127.0.0.1:8080)
 pnpm build        # Type-check with vue-tsc then build for production
 pnpm preview      # Preview the production build
+pnpm lint         # ESLint check (uses cache)
+pnpm lint:fix     # ESLint check + auto-fix
+pnpm format       # Prettier format src/
+pnpm format:check # Prettier check without writing
 ```
 
-No test suite configured. TypeScript checking via `npx vue-tsc -b --noEmit` is the only static check.
+**First-time setup:** `pnpm install` to fetch newly added ESLint/Prettier deps before running lint commands.
+
+No test suite configured. Static checks: TypeScript (`npx vue-tsc -b --noEmit`), ESLint (`pnpm lint`), Prettier (`pnpm format:check`).
+
+### Lint / Format Configuration
+
+- `eslint.config.js` — ESLint 9 flat config (Vue + TypeScript + Prettier-compatible).
+- `.prettierrc.json` — singleQuote, no semi, trailingComma=all, printWidth=110.
+- ESLint rules deliberately start loose (`any` is `warn`, not `error`) so existing code doesn't drown in red.
+  Tighten in stages as files get touched.
 
 ## Architecture
 
@@ -83,8 +96,28 @@ Layout components in `src/layouts/components/`:
 |---|---|
 | Auth | `auth/user.ts` — login, getInfo, changePassword, getCaptcha |
 | Menu | `menu/index.ts` — CRUD + tree queries |
-| System | `system/{user,role,dept}.ts` |
-| Code gen | `gen/codegen.ts` |
+| System | `system/{user,role,dept,storage,...}.ts` — incl. `storage.ts` for object-storage config |
+| Monitor | `monitor/server.ts` — server / cache / db info, all driven by `/api/admin/monitor/*` |
+| Biz (business-end management) | `biz/{oauth,sms,email,user}.ts` — admin views of biz config + biz users |
+| Code gen | `gen/codegen.ts` (stub) |
+
+### Subject Type (admin vs biz)
+
+The backend issues JWTs carrying a `subject_type` claim — `admin` for this UI, `biz` for the business-end (which is *not* this repo). Middlewares on the backend strictly reject cross-subject tokens. **This frontend is the admin side**: tokens it stores are always `subject_type=admin`, hitting `/api/biz/*` from here is a backend 401. The `/api/biz/*` business-end APIs are intended for a separate frontend (web/H5/mini-program) that doesn't yet exist in this workspace.
+
+### "业务管理" Menu Group
+
+Top-level menu introduced for managing biz-end resources from the admin UI:
+- `views/biz/oauth/` — Third-party login (WeChat / QQ / Apple) AppID/Secret config
+- `views/biz/sms/` — SMS channel config (Aliyun / Tencent) — login codes only
+- `views/biz/email/` — SMTP channel config — login codes only
+- `views/biz/user/` — Biz-end user list, status (enable/disable)
+
+All four follow the same pattern: list table + drawer form + dynamic fields per driver/platform + test button. Reference `views/system/storage/index.vue` for the template.
+
+### Monitor Pages
+
+`views/monitor/server/index.vue` and `views/monitor/cache/index.vue` poll their endpoints on a 5s `setInterval`, with a switch to pause. Clean up the timer in `onBeforeUnmount`. Backend data is rich (gopsutil for server, Redis INFO for cache).
 
 ### Styling
 

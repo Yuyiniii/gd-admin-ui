@@ -33,13 +33,7 @@
             </a-button>
           </a-tooltip>
 
-          <a-badge :count="3" :max-count="99">
-            <a-tooltip content="通知">
-              <a-button type="text" class="header-btn">
-                <icon-notification />
-              </a-button>
-            </a-tooltip>
-          </a-badge>
+          <NotifyCenter />
         </div>
 
         <ThemeToggle />
@@ -72,9 +66,9 @@ import { usePermissionStore } from '@/utils/pinia/permission'
 import BreadcrumbNav from './BreadcrumbNav.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import UserMenu from './UserMenu.vue'
+import NotifyCenter from '@/components/NotifyCenter.vue'
 import {
-  IconMenu, IconRefresh, IconFullscreen, IconFullscreenExit,
-  IconNotification, IconFile
+  IconMenu, IconRefresh, IconFullscreen, IconFullscreenExit, IconFile
 } from '@arco-design/web-vue/es/icon'
 
 interface SearchResult { id: number; title: string; path: string }

@@ -135,6 +135,8 @@ export function getRoleMenuIds(roleId: number) {
 export interface MenuTreeItem {
     id: number
     label: string
+    menuType?: number   // 1=目录 2=菜单 3=按钮
+    permission?: string // 按钮权限标识，如 system:user:query
     children?: MenuTreeItem[]
 }
 
@@ -142,18 +144,29 @@ export interface MenuTreeItem {
  * 将后端菜单数据转换为前端树形组件需要的格式
  */
 export function transformMenuToTree(menus: BackendMenu[] | MenuTreeItem[]): MenuTreeItem[] {
+    if (menus.length === 0) return []
     // 如果已经是转换后的格式，直接返回
-    if (menus.length > 0 && 'id' in menus[0]) {
+    if ('id' in menus[0] && !('MenuID' in menus[0]) && !('menuID' in menus[0])) {
         return menus as MenuTreeItem[]
     }
-    const buildTree = (items: BackendMenu[], parentId: number): MenuTreeItem[] => {
+    // 统一字段名（兼容 PascalCase 和 camelCase）
+    const normalized = (menus as any[]).map(item => ({
+        id: item.MenuID ?? item.menuID ?? 0,
+        parentId: item.ParentID ?? item.parentId ?? item.parentID ?? 0,
+        label: item.MenuName ?? item.menuName ?? '',
+        menuType: item.MenuType ?? item.menuType ?? 0,
+        permission: item.Permission ?? item.permission ?? '',
+    }))
+    const buildTree = (items: typeof normalized, parentId: number): MenuTreeItem[] => {
         return items
-            .filter(item => item.ParentID === parentId)
-            .map(item => ({
-                id: item.MenuID,
-                label: item.MenuName,
-                children: buildTree(items, item.MenuID),
-            }))
+            .filter(item => item.parentId === parentId)
+            .map(item => {
+                const children = buildTree(items, item.id)
+                const node: MenuTreeItem = { id: item.id, label: item.label, menuType: item.menuType }
+                if (item.permission) node.permission = item.permission
+                if (children.length) node.children = children
+                return node
+            })
     }
-    return buildTree(menus as BackendMenu[], 0)
+    return buildTree(normalized, 0)
 }

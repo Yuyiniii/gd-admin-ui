@@ -199,3 +199,35 @@ export function changePassword(data: ChangePasswordRequest) {
     data
   })
 }
+
+/**
+ * 更新个人资料请求
+ */
+export interface UpdateProfileRequest {
+  nickname: string
+  email?: string
+  phone?: string
+  sex?: number
+}
+
+/**
+ * 更新个人资料（当前用户）
+ */
+export function updateProfile(data: UpdateProfileRequest) {
+  return request({
+    url: '/api/admin/user/profile',
+    method: 'put',
+    data
+  })
+}
+
+/**
+ * 导出用户列表（返回 Blob）
+ */
+export function exportUserList(): Promise<Blob> {
+  return request({
+    url: '/api/admin/export/users',
+    method: 'get',
+    responseType: 'blob',
+  }) as unknown as Promise<Blob>
+}

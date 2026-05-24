@@ -102,12 +102,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onBeforeUnmount, markRaw } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, markRaw } from 'vue'
 import { useUserStore } from '@/utils/pinia/pinia'
 import {
   IconUser, IconUserGroup, IconBarChart, IconRefresh,
   IconArrowUp, IconArrowDown, IconUpload, IconSafe, IconHistory,
 } from '@arco-design/web-vue/es/icon'
+import request from '@/utils/axios/request'
+import { createChart, type EChartsType } from '@/utils/echarts/lazy'
 
 const userStore = useUserStore()
 
@@ -134,7 +136,7 @@ interface StatItem {
 const stats = reactive<StatItem[]>([
   {
     key: 'users',
-    label: '活跃用户',
+    label: '在线用户',
     value: 0,
     icon: markRaw(IconUserGroup),
     bgColor: 'rgba(22, 93, 255, 0.1)',
@@ -176,27 +178,61 @@ const realtimeData = reactive({
   responseTime: 0,
 })
 
-let chartInstance: any = null
+let chartInstance: EChartsType | null = null
 let updateTimer: number | null = null
+
+const fetchRealStats = async () => {
+  try {
+    const [onlineRes, loginRes] = await Promise.allSettled([
+      request<{ totalOnlineUsers: number }>({ url: '/api/admin/online/statistics', method: 'get' }),
+      request<{ todayLogs: number; totalLogs: number; successRate: number }>({ url: '/api/admin/log/login/statistics', method: 'get' }),
+    ])
+
+    if (onlineRes.status === 'fulfilled') {
+      const count = onlineRes.value.data?.totalOnlineUsers ?? 0
+      stats[0].value = count
+      realtimeData.onlineUsers = count
+    }
+
+    if (loginRes.status === 'fulfilled') {
+      const d = loginRes.value.data
+      stats[1].value = d?.todayLogs ?? stats[1].value
+    }
+  } catch {
+    // silently keep simulated values
+  }
+}
 
 const initChart = async () => {
   if (!chartContainer.value) return
-  const echartsModule = await import('echarts')
-  const echarts = (echartsModule as any).default || echartsModule
-  chartInstance = echarts.init(chartContainer.value)
+  chartInstance = await createChart(chartContainer.value)
   renderChart()
+}
+
+const getChartConfig = () => {
+  if (chartTimeRange.value === 'week') {
+    const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+    return { labels: days, scale: [100, 300, 30, 100] }
+  } else if (chartTimeRange.value === 'month') {
+    const days = Array.from({ length: 30 }, (_, i) => `${i + 1}日`)
+    return { labels: days, scale: [200, 600, 50, 200] }
+  } else {
+    const months = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
+    return { labels: months, scale: [1000, 5000, 200, 800] }
+  }
 }
 
 const renderChart = () => {
   if (!chartInstance) return
-  const requestData = Array.from({ length: 7 }, () => 50 + Math.round(Math.random() * 200))
-  const userData = Array.from({ length: 7 }, () => 20 + Math.round(Math.random() * 80))
+  const { labels, scale } = getChartConfig()
+  const requestData = Array.from({ length: labels.length }, () => scale[0] + Math.round(Math.random() * scale[1]))
+  const userData = Array.from({ length: labels.length }, () => scale[2] + Math.round(Math.random() * scale[3]))
   chartInstance.setOption({
     tooltip: { trigger: 'axis' },
     legend: { data: ['请求数', '用户数'], bottom: 4 },
     xAxis: {
       type: 'category',
-      data: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00', '24:00'],
+      data: labels,
       axisLine: { lineStyle: { color: '#e5e6eb' } },
       axisTick: { show: false },
     },
@@ -238,21 +274,27 @@ const simulateData = () => {
   renderChart()
 }
 
-const handleRefresh = () => {
+const handleRefresh = async () => {
   isLoading.value = true
-  setTimeout(() => {
-    simulateData()
-    isLoading.value = false
-  }, 600)
+  simulateData()
+  await fetchRealStats()
+  renderChart()
+  isLoading.value = false
 }
 
 const handleResize = () => chartInstance?.resize()
+
+watch(chartTimeRange, () => renderChart())
 
 onMounted(() => {
   setTimeout(() => {
     simulateData()
     initChart()
-    updateTimer = window.setInterval(simulateData, 5000)
+    fetchRealStats()
+    updateTimer = window.setInterval(() => {
+      simulateData()
+      fetchRealStats()
+    }, 30000)
   }, 300)
   window.addEventListener('resize', handleResize)
 })

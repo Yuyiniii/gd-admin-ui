@@ -22,6 +22,15 @@ export interface LoginResponse {
 }
 
 /**
+ * 刷新 Token 响应（与登录响应结构一致）
+ */
+export interface RefreshTokenResponse {
+    token: string
+    refreshToken: string
+    expiresAt: number
+}
+
+/**
  * 部门信息
  */
 export interface DeptInfo {
@@ -125,4 +134,18 @@ export function getCaptcha() {
         url: '/api/auth/code',
         method: 'get'
     })
+}
+
+/**
+ * 刷新 access token（白名单，不需要 access token；但需要有效的 refreshToken）
+ * 后端会同时下发新的 refreshToken（滚动刷新）
+ */
+export function refreshToken(refreshToken: string) {
+    return request<RefreshTokenResponse>({
+        url: '/api/auth/refresh-token',
+        method: 'post',
+        data: { refreshToken },
+        // 让拦截器识别这是一个 refresh 请求本身，避免递归
+        _isRefreshTokenRequest: true,
+    } as any)
 }
